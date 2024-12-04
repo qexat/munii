@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: Rust Formatter
+        description: "A tool for formatting Rust code according to style guidelines."
+        language: rust
+        entry: rustfmt
+        types: [rust]
+  - repo: https://github.com/arenadotio/pre-commit-ocamlformat
+    rev: 0439858f79b3bcb49e757278eb1312e212d7dd4f # or pick a commit sha I guess
+    hooks:
+      - id: ocamlformat
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
