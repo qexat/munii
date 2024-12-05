@@ -140,6 +140,9 @@ enum ErrKind {
     InvalidCharacterLiteral {
         reason: &'static str,
     },
+    UnimplementedExprRule {
+        precedence: Precedence,
+    },
     UnmatchedParenthesis {
         left_paren: Token,
     },
@@ -580,11 +583,20 @@ impl OldParser {
     }
 }
 
-trait Parser {
-    fn create(tokens: Vec<Token>) -> Self
-    where
-        Self: Sized;
+trait Parser: StmtParser + ExprParser {
+    fn parse_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_compound_expr()
+    }
 
+    fn parse_stmt(&mut self) -> Option<Result<Stmt, Error>>;
+}
+
+trait StmtParser {
+    fn parse_expr_stmt(&mut self) -> Result<Stmt, Error>;
+    fn parse_let_stmt(&mut self) -> Result<Stmt, Error>;
+    fn parse_type_stmt(&mut self) -> Result<Stmt, Error>;
+}
+trait ExprParser {
     fn parse_atom_expr(&mut self) -> Result<Expr, Error>;
     fn parse_prioritized_expr(&mut self) -> Result<Expr, Error>;
     fn parse_extraction_expr(&mut self) -> Result<Expr, Error>;
@@ -621,31 +633,57 @@ enum Precedence {
     Compound,
 }
 
-trait RuleParser<T> {
+trait StmtRuleParser {
+    fn parse(&self, parent: &dyn StmtParser) -> Option<Result<Stmt, Error>>;
+}
+
+trait ExprRuleParser {
     fn precedence(&self) -> &Precedence;
-    fn parse(&self, parent: &dyn Parser) -> Option<Result<T, Error>>;
+    fn parse(&self, parent: &dyn ExprParser) -> Option<Result<Expr, Error>>;
 }
 
 struct GlobalParser {
     tokens: Vec<Token>,
-    parsers: Vec<&'static dyn RuleParser<Expr>>,
+    stmt_parsers: Vec<&'static dyn StmtRuleParser>,
+    expr_parsers: Vec<&'static dyn ExprRuleParser>,
     start_stack: Vec<usize>,
     current: usize,
     unrecoverable: bool,
+    allow_unimplemented: bool,
 }
 
 impl Parser for GlobalParser {
-    fn create(tokens: Vec<Token>) -> Self {
-        Self {
-            tokens,
-            parsers: vec![],
-            start_stack: vec![],
-            current: 0,
-            unrecoverable: false,
+    fn parse_stmt(&mut self) -> Option<Result<Stmt, Error>> {
+        for parser in self.stmt_parsers.iter() {
+            match parser.parse(self) {
+                None => continue,
+                Some(result) => return Some(result),
+            }
         }
+
+        None
+    }
+}
+
+impl StmtParser for GlobalParser {
+    fn parse_expr_stmt(&mut self) -> Result<Stmt, Error> {
+        todo!()
     }
 
+    fn parse_let_stmt(&mut self) -> Result<Stmt, Error> {
+        todo!()
+    }
+
+    fn parse_type_stmt(&mut self) -> Result<Stmt, Error> {
+        todo!()
+    }
+}
+
+impl ExprParser for GlobalParser {
     fn parse_atom_expr(&mut self) -> Result<Expr, Error> {
+        // TODO: instead of generating the error here, use Option
+        // to make it climb such that parse_expr() is the one producing
+        // the "expected expression" error
         self.parse_expr_or(
             Precedence::Atom,
             Err(Error {
@@ -705,15 +743,31 @@ impl Parser for GlobalParser {
 }
 
 impl GlobalParser {
-    fn add_parser(&mut self, parser: &'static dyn RuleParser<Expr>) {
-        self.parsers.push(parser);
+    fn create(tokens: Vec<Token>, allow_unimplemented: bool) -> Self {
+        Self {
+            tokens,
+            stmt_parsers: vec![],
+            expr_parsers: vec![],
+            start_stack: vec![],
+            current: 0,
+            unrecoverable: false,
+            allow_unimplemented: allow_unimplemented,
+        }
     }
 
-    fn get_parsers_with_precedence(
+    fn add_stmt_parser(&mut self, parser: &'static dyn StmtRuleParser) {
+        self.stmt_parsers.push(parser);
+    }
+
+    fn add_expr_parser(&mut self, parser: &'static dyn ExprRuleParser) {
+        self.expr_parsers.push(parser);
+    }
+
+    fn get_expr_parsers_with_precedence(
         &self,
         precedence: Precedence,
-    ) -> Vec<&&'static dyn RuleParser<Expr>> {
-        self.parsers
+    ) -> Vec<&&'static dyn ExprRuleParser> {
+        self.expr_parsers
             .iter()
             .filter(|parser| parser.precedence() == &precedence)
             .collect()
@@ -756,7 +810,16 @@ impl GlobalParser {
     where
         F: Fn(&mut Self) -> Result<Expr, Error>,
     {
-        let parsers = self.get_parsers_with_precedence(precedence);
+        let parsers = self.get_expr_parsers_with_precedence(precedence);
+
+        if !self.allow_unimplemented && parsers.is_empty() {
+            return Err(Error {
+                kind: ErrKind::UnimplementedExprRule {
+                    precedence: precedence,
+                },
+                position: self.current,
+            });
+        }
 
         for parser in parsers {
             match parser.parse(self) {
