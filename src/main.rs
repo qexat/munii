@@ -375,14 +375,14 @@ impl Lexer {
 }
 
 #[derive(Clone, Debug)]
-struct Parser {
+struct OldParser {
     tokens: Vec<Token>,
     start_stack: Vec<usize>,
     current: usize,
     unrecoverable: bool,
 }
 
-impl Analyzer<Token, TokenKind> for Parser {
+impl Analyzer<Token, TokenKind> for OldParser {
     fn is_at_end(&self) -> bool {
         self.peek().kind == TokenKind::Eof
     }
@@ -400,7 +400,7 @@ impl Analyzer<Token, TokenKind> for Parser {
     }
 }
 
-impl Parser {
+impl OldParser {
     fn create(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
@@ -466,8 +466,6 @@ impl Parser {
                 identifier: self.previous().lexeme,
             });
         }
-
-        println!("{:#?}", self);
 
         Err(Error {
             kind: ErrKind::ExpectedExpression,
@@ -582,6 +580,195 @@ impl Parser {
     }
 }
 
+trait Parser {
+    fn create(tokens: Vec<Token>) -> Self
+    where
+        Self: Sized;
+
+    fn parse_atom_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_prioritized_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_extraction_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_application_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_unary_strong_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_unary_weak_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_binary_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_labeling_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_control_flow_expr(&mut self) -> Result<Expr, Error>;
+    fn parse_compound_expr(&mut self) -> Result<Expr, Error>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+enum Precedence {
+    // Identifiers, numbers, strings, etc
+    Atom,
+    // Grouping
+    Prioritized,
+    // Membership
+    Extraction,
+    // Function calls, etc
+    Application,
+    // We have 2 precedence orders for unary to handle the case
+    // of having both prefix and postfix on the same expression
+    UnaryStrong,
+    UnaryWeak,
+    // rank 0 is sum, rank 1 is product, and so on
+    Binary { rank: usize },
+    // Application labels tie very loosely
+    Labeling,
+    // Match and alike
+    ControlFlow,
+    // Chained expressions
+    Compound,
+}
+
+trait RuleParser<T> {
+    fn precedence(&self) -> &Precedence;
+    fn parse(&self, parent: &dyn Parser) -> Option<Result<T, Error>>;
+}
+
+struct GlobalParser {
+    tokens: Vec<Token>,
+    parsers: Vec<&'static dyn RuleParser<Expr>>,
+    start_stack: Vec<usize>,
+    current: usize,
+    unrecoverable: bool,
+}
+
+impl Parser for GlobalParser {
+    fn create(tokens: Vec<Token>) -> Self {
+        Self {
+            tokens,
+            parsers: vec![],
+            start_stack: vec![],
+            current: 0,
+            unrecoverable: false,
+        }
+    }
+
+    fn parse_atom_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or(
+            Precedence::Atom,
+            Err(Error {
+                kind: ErrKind::ExpectedExpression,
+                position: self.current,
+            }),
+        )
+    }
+
+    fn parse_prioritized_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::Prioritized, |parser| parser.parse_atom_expr())
+    }
+
+    fn parse_extraction_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::Extraction, |parser| {
+            parser.parse_prioritized_expr()
+        })
+    }
+
+    fn parse_application_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::Application, |parser| {
+            parser.parse_extraction_expr()
+        })
+    }
+
+    fn parse_unary_strong_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::UnaryStrong, |parser| {
+            parser.parse_application_expr()
+        })
+    }
+
+    fn parse_unary_weak_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::UnaryWeak, |parser| {
+            parser.parse_unary_strong_expr()
+        })
+    }
+
+    fn parse_binary_expr(&mut self) -> Result<Expr, Error> {
+        todo!()
+    }
+
+    fn parse_labeling_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::Labeling, |parser| parser.parse_binary_expr())
+    }
+
+    fn parse_control_flow_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::ControlFlow, |parser| {
+            parser.parse_labeling_expr()
+        })
+    }
+
+    fn parse_compound_expr(&mut self) -> Result<Expr, Error> {
+        self.parse_expr_or_else(Precedence::Compound, |parser| {
+            parser.parse_control_flow_expr()
+        })
+    }
+}
+
+impl GlobalParser {
+    fn add_parser(&mut self, parser: &'static dyn RuleParser<Expr>) {
+        self.parsers.push(parser);
+    }
+
+    fn get_parsers_with_precedence(
+        &self,
+        precedence: Precedence,
+    ) -> Vec<&&'static dyn RuleParser<Expr>> {
+        self.parsers
+            .iter()
+            .filter(|parser| parser.precedence() == &precedence)
+            .collect()
+    }
+
+    fn pop_stack(&mut self) {
+        let new_length = self.start_stack.len().saturating_sub(1);
+        self.start_stack.truncate(new_length);
+    }
+
+    fn backtrack(&mut self) {
+        match self.start_stack.pop() {
+            None => self.unrecoverable = true,
+            Some(index) => self.current = index,
+        }
+    }
+
+    fn start_rule(&mut self) {
+        self.start_stack.push(self.current);
+    }
+
+    fn end_rule(&mut self, result: Result<Expr, Error>) -> Result<Expr, Error> {
+        match result {
+            Ok(_) => self.pop_stack(),
+            Err(_) => self.backtrack(),
+        }
+
+        result
+    }
+
+    fn parse_expr_or(
+        &mut self,
+        precedence: Precedence,
+        fallback: Result<Expr, Error>,
+    ) -> Result<Expr, Error> {
+        self.parse_expr_or_else(precedence, |_| fallback.clone())
+    }
+
+    fn parse_expr_or_else<F>(&mut self, precedence: Precedence, next_rule: F) -> Result<Expr, Error>
+    where
+        F: Fn(&mut Self) -> Result<Expr, Error>,
+    {
+        let parsers = self.get_parsers_with_precedence(precedence);
+
+        for parser in parsers {
+            match parser.parse(self) {
+                None => continue,
+                Some(result) => return result,
+            }
+        }
+
+        next_rule(self)
+    }
+}
+
 fn lex(source: String) -> Result<Vec<Token>, Error> {
     let mut lexer = Lexer::create(source);
     lexer.run()?;
@@ -590,7 +777,7 @@ fn lex(source: String) -> Result<Vec<Token>, Error> {
 }
 
 fn parse(tokens: Vec<Token>) -> Result<Ast, Error> {
-    let mut parser = Parser::create(tokens);
+    let mut parser = OldParser::create(tokens);
 
     parser.run()
 }
