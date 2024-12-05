@@ -51,7 +51,8 @@ munii > let strip_trailing_newline string =
       |     case rest ++ "\n" -> rest
       |   end
 ___________________________________________
-strip_trailing_newline : (string : rest ++ "\n") -> rest
+strip_trailing_newline : (string : ?A ++ "\n") -> ?A
+    where ?A : String
 ```
 
 Let's try it out:
