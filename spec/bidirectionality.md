@@ -74,7 +74,7 @@ Error: the type of argument `without_newline` does not match expectations:
 
     1  | let really_no_newline = strip_trailing_newline without_newline
                                  ---------------------- ^^^^^^^^^^^^^^^
-  -> `strip_trailing_newline` first argument was expected to be a `rest ++ "\n"`
+  -> `strip_trailing_newline` first argument was expected to be a `?A ++ "\n"`
   -> `without_newline` fails to match such type
 
 Failed to define `really_no_newline`.
