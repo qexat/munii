@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TokenKind {
@@ -66,59 +66,74 @@ impl fmt::Display for Token {
 }
 
 #[derive(Clone, Debug)]
-struct Ast<'a> {
-    body: Vec<Stmt<'a>>,
+struct Ast {
+    body: Arc<[Stmt]>,
 }
 
 #[derive(Clone, Debug)]
-enum Stmt<'a> {
-    Expr(ExprStmt<'a>),
-    Let(LetStmt<'a>),
-    Type(TypeStmt<'a>),
+enum Stmt {
+    Expr(ExprStmt),
+    Let(LetStmt),
+    Type(TypeStmt),
 }
 
 #[derive(Clone, Debug)]
-struct ExprStmt<'a> {
-    expr: Expr<'a>,
+struct ExprStmt {
+    expr: Expr,
 }
 
 #[derive(Clone, Debug)]
-struct LetStmt<'a> {
-    pattern: Pattern<'a>,
-    parameters: &'a [Parameter<'a>],
-    return_annotation: TypeForm<'a>,
-    expr: Expr<'a>,
+struct LetStmt {
+    pattern: Pattern,
+    parameters: Arc<[Parameter]>,
+    return_annotation: TypeForm,
+    expr: Expr,
 }
 
 #[derive(Clone, Debug)]
-struct TypeStmt<'a> {
-    name: String,
-    parameters: &'a [TypeParameter<'a>],
-    expr: TypeExpr<'a>,
+struct TypeStmt {
+    name: TypeIdentifier,
+    parameters: Arc<[TypeParameter]>,
+    expr: TypeExpr,
 }
 
 #[derive(Clone, Debug)]
-enum Expr<'a> {
+enum Expr {
     Identifier(IdentifierExpr),
-    Bool(BoolExpr),
-    Integer(IntegerExpr),
-    Char(CharExpr),
-    String(StringExpr),
-    Unit(UnitExpr),
-    List(ListExpr<'a>),
-    Grouping(GroupingExpr<'a>),
-    Member(MemberExpr<'a>),
-    App(AppExpr<'a>),
-    Unary(UnaryExpr<'a>),
-    Binary(BinaryExpr<'a>),
-    Labelled(LabelledExpr<'a>),
-    Match(MatchExpr<'a>),
-    Chained(ChainedExpr<'a>),
+    Literal(LiteralExpr),
+    Grouping(GroupingExpr),
+    Member(MemberExpr),
+    App(AppExpr),
+    Unary(UnaryExpr),
+    Binary(BinaryExpr),
+    Labelled(LabelledExpr),
+    Match(MatchExpr),
+    Chained(ChainedExpr),
 }
 
 #[derive(Clone, Debug)]
 struct IdentifierExpr {
     lexeme: String,
+}
+
+#[derive(Clone, Debug)]
+enum LiteralExpr {
+    Scalar(ScalarLiteralExpr),
+    Compound(CompoundLiteralExpr),
+}
+
+#[derive(Clone, Debug)]
+enum ScalarLiteralExpr {
+    Bool(BoolExpr),
+    Integer(IntegerExpr),
+    Char(CharExpr),
+    String(StringExpr),
+    Unit(UnitExpr),
+}
+
+#[derive(Clone, Debug)]
+enum CompoundLiteralExpr {
+    List(ListExpr),
 }
 
 #[derive(Clone, Debug)]
@@ -145,58 +160,126 @@ struct StringExpr {
 struct UnitExpr;
 
 #[derive(Clone, Debug)]
-struct ListExpr<'a> {
-    items: &'a [Expr<'a>],
+struct ListExpr {
+    items: Arc<[Expr]>,
 }
 
 #[derive(Clone, Debug)]
-struct GroupingExpr<'a>(Box<Expr<'a>>);
+struct GroupingExpr(Box<Expr>);
 
 #[derive(Clone, Debug)]
-struct MemberExpr<'a> {
-    accessor: Box<Expr<'a>>,
-    attribute_list: &'a [String],
+struct MemberExpr {
+    accessor: Box<Expr>,
+    attributes: Arc<[IdentifierExpr]>,
 }
 
 #[derive(Clone, Debug)]
-struct AppExpr<'a> {
-    application: Box<Expr<'a>>,
-    arguments: &'a [Expr<'a>],
+struct AppExpr {
+    application: Box<Expr>,
+    arguments: Arc<[Expr]>,
 }
 
 #[derive(Clone, Debug)]
-struct UnaryExpr<'a> {
+struct UnaryExpr {
     operator: TokenKind,
-    expr: Box<Expr<'a>>,
+    expr: Box<Expr>,
 }
 
 #[derive(Clone, Debug)]
-struct BinaryExpr<'a> {
+struct BinaryExpr {
     operator: TokenKind,
-    left: Box<Expr<'a>>,
-    right: Box<Expr<'a>>,
+    left: Box<Expr>,
+    right: Box<Expr>,
 }
 
 #[derive(Clone, Debug)]
-struct LabelledExpr<'a> {
+struct LabelledExpr {
     name: String,
-    expr: Box<Expr<'a>>,
+    expr: Box<Expr>,
 }
 
 #[derive(Clone, Debug)]
-struct MatchExpr<'a> {
-    scrutinee: Box<Expr<'a>>,
-    branches: &'a [MatchBranch<'a>],
+struct MatchExpr {
+    scrutinee: Box<Expr>,
+    branches: Arc<[MatchBranch]>,
 }
 
 #[derive(Clone, Debug)]
-struct MatchBranch<'a> {
-    pattern: Pattern<'a>,
-    leaf: Expr<'a>,
+struct MatchBranch {
+    pattern: Pattern,
+    leaf: Expr,
 }
 
 #[derive(Clone, Debug)]
-struct ChainedExpr<'a> {
-    left: Box<Expr<'a>>,
-    right: Box<Expr<'a>>,
+struct ChainedExpr {
+    left: Box<Expr>,
+    right: Box<Expr>,
+}
+
+/* Type grammar */
+
+#[derive(Clone, Debug)]
+enum TypeForm {
+    Expr(TypeExpr),
+    Var(TypeVar),
+}
+
+#[derive(Clone, Debug)]
+enum TypeExpr {
+    // Foo Bar
+    App(TypeApp),
+    // Foo | Bar ; Foo -> Bar
+    BinaryOp(TypeBinaryOp),
+    // Foo
+    Identifier(TypeIdentifier),
+    // 0 ; "hello"
+    Literal(TypeLiteral),
+    // Foo.Bar.Baz
+    Member(TypeMember),
+    // Foo, Bar
+    Tuple(TypeTuple),
+}
+
+#[derive(Clone, Debug)]
+struct TypeApp {
+    applied: Box<TypeExpr>,
+    arguments: Arc<[TypeApp]>,
+}
+
+#[derive(Clone, Debug)]
+struct TypeBinaryOp {
+    operator: TokenKind,
+    left: Box<TypeExpr>,
+    right: Box<TypeExpr>,
+}
+#[derive(Clone, Debug)]
+struct TypeIdentifier {
+    lexeme: String,
+}
+
+#[derive(Clone, Debug)]
+struct TypeLiteral {
+    // Rust doesn't allow recursive type aliases, meaning that
+    // we literally can't express constant non-scalar literals
+    literal: ScalarLiteralExpr,
+}
+
+#[derive(Clone, Debug)]
+struct TypeMember {
+    // For now we only allow type identifiers as accessors, but
+    // we might expand on it in the future - for example, we
+    // could allow type applications
+    accessor: TypeIdentifier,
+    attributes: Arc<[TypeIdentifier]>,
+}
+
+#[derive(Clone, Debug)]
+struct TypeTuple {
+    items: Arc<[TypeExpr]>,
+}
+
+#[derive(Clone, Debug)]
+struct TypeVar {
+    // Deliberate choice of not using de Bruijn indices ;)
+    name: String,
 }
