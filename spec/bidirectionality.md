@@ -26,7 +26,7 @@ munii is pretty cool!
 ```ocaml
 (* in the shell *)
 munii > let file = try File.open "message.txt" (mode := FileMode.READ)
-______________________________________________
+______________________________________________________________________
 message : File
 ```
 
@@ -50,7 +50,7 @@ munii > let strip_trailing_newline string =
       |   match string
       |     case rest ++ "\n" -> rest
       |   end
-________________________________________________________________
+___________________________________________
 strip_trailing_newline : (string : rest ++ "\n") -> rest
 ```
 
@@ -58,7 +58,7 @@ Let's try it out:
 
 ```ocaml
 munii > let without_newline = strip_trailing_newline contents
-______________________________________________________________________
+_____________________________________________________________
 without_newline : "munii is pretty cool!"
 ```
 
