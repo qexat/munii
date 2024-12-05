@@ -1,3 +1,5 @@
+mod parser;
+
 use std::{fmt, usize};
 
 trait IsMuniiIdentifier {
@@ -751,7 +753,7 @@ impl GlobalParser {
             start_stack: vec![],
             current: 0,
             unrecoverable: false,
-            allow_unimplemented: allow_unimplemented,
+            allow_unimplemented,
         }
     }
 
